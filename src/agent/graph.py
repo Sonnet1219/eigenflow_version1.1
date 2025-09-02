@@ -29,6 +29,7 @@ async def chat_node(state: OverallState, config: RunnableConfig) -> Dict[str, An
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         temperature=0.5,
     )
+    
     response = await llm.ainvoke([
         SystemMessage(content=SYSTEM_PROMPT),
         *messages,

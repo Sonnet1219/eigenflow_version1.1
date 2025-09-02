@@ -15,9 +15,6 @@ pytest:
 pytest_watch:
 	python -m pytest tests/ --verbose --tb=short -f
 
-pytest_data_processing:
-	python -m pytest tests/test_data_processing_graph.py -v
-
 test_watch:
 	uv run --with-editable . ptw --snapshot-update --now . -- -vv tests/unit_tests
 

@@ -14,11 +14,7 @@ if sys.platform == "win32":
 
 from src.db.checkpoints import CheckpointerManager
 from src.agent.graph import build_graph
-from src.agent.data_graph import build_data_processing_graph
 from src.api.graph import router as graph_router
-from src.api.data_processing import router as data_processing_router
-from src.api.dashboard import router as dashboard_router
-from src.api.openalex_api import router as openalex_router
 from src.api.models import ErrorResponse
 
 import logging
@@ -62,14 +58,12 @@ async def lifespan(app: FastAPI):
         
         # Get the checkpointer instance
         checkpointer = await CheckpointerManager.get_checkpointer()
-        
-        # Build the benchmark graph with async checkpointer
-        benchmark_graph = await build_graph(checkpointer)
-        app.state.graph = benchmark_graph
+
+        # Build the graph with async checkpointer
+        graph = await build_graph(checkpointer)
+        app.state.graph = graph
         
         # Build the data processing graph with async checkpointer
-        data_processing_graph = await build_data_processing_graph(checkpointer)
-        app.state.data_processing_graph = data_processing_graph
         logger.info("Successfully compiled graphs and attached to app state.")
         
         yield
@@ -102,9 +96,6 @@ app.add_middleware(
 
 # Include routers
 app.include_router(graph_router)
-app.include_router(data_processing_router)
-app.include_router(dashboard_router)
-app.include_router(openalex_router)
 
 
 @app.exception_handler(Exception)

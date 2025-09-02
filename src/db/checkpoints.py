@@ -3,7 +3,7 @@
 from typing import Optional, cast, Any
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 import logging
-from src.db.database import DatabaseManager
+from .database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
