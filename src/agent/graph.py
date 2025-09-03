@@ -5,6 +5,8 @@ from typing import Annotated
 
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
+from langgraph_supervisor import create_supervisor
+from langgraph_supervisor.handoff import create_forward_message_tool
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langchain_core.tools import tool, InjectedToolCallId
 from langgraph.prebuilt import InjectedState
@@ -87,44 +89,34 @@ def create_agents():
         name="margin_assistant"
     )
 
-    # Create supervisor agent using create_react_agent
-    supervisor_agent = create_react_agent(
-        model=model,
-        tools=[transfer_to_chat_assistant, transfer_to_margin_assistant],
-        prompt=SUPERVISOR_PROMPT,
-        name="supervisor"
-    )
-    
-    return supervisor_agent, chat_assistant, margin_assistant
+    return chat_assistant, margin_assistant
 
 
-# Create agents - this will be done on module import
-# Note: This requires API key to be set before import
+# ref：https://github.com/langchain-ai/langgraph-supervisor-py#customizing-handoff-tools
 try:
-    supervisor_agent, chat_assistant, margin_assistant = create_agents()
-    
-    # Build multi-agent supervisor graph
-    builder = StateGraph(MessagesState)
-    builder.add_node(supervisor_agent, destinations=("chat_assistant", "margin_assistant", END))
-    builder.add_node(chat_assistant)
-    builder.add_node(margin_assistant)
-    builder.add_edge(START, "supervisor")
-    # Worker agents always return to supervisor
-    builder.add_edge("chat_assistant", "supervisor")
-    builder.add_edge("margin_assistant", "supervisor")
-    
-    # Compile default graph
-    graph = builder.compile()
-    
+    model = get_model()
+    chat_assistant, margin_assistant = create_agents()
+
+    forwarding_tool = create_forward_message_tool("supervisor") # The argument is the name to assign to the resulting forwarded message
+
+    # Create supervisor 
+    graph = create_supervisor(
+        [chat_assistant, margin_assistant],
+        model=model,
+        prompt=SUPERVISOR_PROMPT,
+        add_handoff_messages=False,   # Don't add handoff messages to conversation history
+        output_mode="last_message",   # Return only the last message from the active agent
+        tools=[forwarding_tool]       # Supervisor can use forwarding tool to pass messages between agents
+    )
+
 except Exception as e:
     # If API key is not available, create placeholder objects
     print(f"Warning: Could not create agents during module import: {e}")
-    builder = None
     graph = None
     
 
 
-def build_graph(checkpointer, store=None):
+async def build_graph(checkpointer, store=None):
     """
     Compiles the graph with the given checkpointer and memory store.
     
@@ -135,7 +127,7 @@ def build_graph(checkpointer, store=None):
     Returns:
         Compiled graph instance
     """
-    return builder.compile(
+    return graph.compile(
         checkpointer=checkpointer,
         store=store
     )
