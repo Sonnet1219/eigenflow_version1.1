@@ -1,6 +1,7 @@
-"""Multi-agent supervisor workflow using prebuilt components from LangGraph"""
+"""Multi-agent supervisor workflow using prebuilt components from LangGraph with main graph + subgraph architecture"""
 
 import os
+import json
 from typing import Annotated
 
 from langchain_openai import ChatOpenAI
@@ -11,11 +12,15 @@ from langgraph.graph import StateGraph, MessagesState, START, END
 from langchain_core.tools import tool, InjectedToolCallId
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
+from langchain_core.messages import HumanMessage
 
+from src.agent.state import OverallState, SupervisorState
+from src.agent.schemas import IntentClassification
 from src.agent.prompts import (
     CHAT_ASSISTANT_PROMPT,
     MARGIN_CHECK_ASSISTANT_PROMPT,
-    SUPERVISOR_PROMPT
+    SUPERVISOR_PROMPT,
+    INTENT_CLASSIFICATION_PROMPT
 )
 from src.agent.utils import chat_response
 from src.agent.mcp import get_lp_margin_report
@@ -29,6 +34,55 @@ def get_model():
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         temperature=0.5
     )
+
+
+async def classify_intent(state: OverallState) -> OverallState:
+    """Classify user intent using LLM with structured output."""
+    try:
+        model = get_model()
+        
+        # Get the latest user message
+        messages = state.get("messages", [])
+        if not messages:
+            return {"intent": "chat"}
+            
+        latest_message = messages[-1]
+        user_input = latest_message.content if hasattr(latest_message, 'content') else str(latest_message)
+        
+        # Use structured output for intent classification
+        structured_model = model.with_structured_output(IntentClassification)
+        
+        # Use the predefined prompt from prompts.py with user input formatting
+        formatted_prompt = INTENT_CLASSIFICATION_PROMPT.format(user_input=user_input)
+        
+        result = await structured_model.ainvoke([HumanMessage(content=formatted_prompt)])
+        
+        return {"intent": result.intent}
+        
+    except Exception as e:
+        print(f"Error in intent classification: {e}")
+        return {"intent": "chat"}  # Default to chat on error
+
+
+async def call_supervisor(state: OverallState) -> OverallState:
+    """Call supervisor subgraph with transformed state."""
+    try:
+        # Transform OverallState to SupervisorState
+        supervisor_input = {
+            "messages": state.get("messages", []),
+            "intent": state.get("intent", "chat")
+        }
+        
+        # Invoke supervisor subgraph
+        result = await supervisor_subgraph.ainvoke(supervisor_input)
+        
+        # Transform result back to OverallState
+        return {"messages": result.get("messages", [])}
+        
+    except Exception as e:
+        print(f"Error calling supervisor subgraph: {e}")
+        # Return original messages if subgraph fails
+        return {"messages": state.get("messages", [])}
 
 
 # Create handoff tools for supervisor communication
@@ -69,9 +123,9 @@ transfer_to_margin_assistant = create_handoff_tool(
 )
 
 
-# Worker agents and supervisor will be created when module loads
-def create_agents():
-    """Create worker agents and supervisor agent."""
+# Worker agents and supervisor subgraph creation
+def create_supervisor_subgraph():
+    """Create supervisor subgraph with worker agents."""
     model = get_model()
     
     # Create worker agents using create_react_agent
@@ -89,18 +143,10 @@ def create_agents():
         name="margin_assistant"
     )
 
-    return chat_assistant, margin_assistant
+    forwarding_tool = create_forward_message_tool("supervisor")
 
-
-# ref：https://github.com/langchain-ai/langgraph-supervisor-py#customizing-handoff-tools
-try:
-    model = get_model()
-    chat_assistant, margin_assistant = create_agents()
-
-    forwarding_tool = create_forward_message_tool("supervisor") # The argument is the name to assign to the resulting forwarded message
-
-    # Create supervisor 
-    graph = create_supervisor(
+    # Create supervisor subgraph and compile it
+    supervisor = create_supervisor(
         [chat_assistant, margin_assistant],
         model=model,
         prompt=SUPERVISOR_PROMPT,
@@ -108,10 +154,40 @@ try:
         output_mode="last_message",   # Return only the last message from the active agent
         tools=[forwarding_tool]       # Supervisor can use forwarding tool to pass messages between agents
     )
+    
+    # Compile the supervisor subgraph so it has ainvoke method
+    return supervisor.compile()
+
+
+def create_main_graph():
+    """Create main graph with intent classification and supervisor subgraph."""
+    # Create the main graph with OverallState
+    builder = StateGraph(OverallState)
+    
+    # Add intent classification node
+    builder.add_node("classify_intent", classify_intent)
+    
+    # Add supervisor subgraph call node  
+    builder.add_node("call_supervisor", call_supervisor)
+    
+    # Define the flow: START -> classify_intent -> call_supervisor -> END
+    builder.add_edge(START, "classify_intent")
+    builder.add_edge("classify_intent", "call_supervisor")
+    builder.add_edge("call_supervisor", END)
+    
+    return builder.compile()
+
+
+# Initialize components when module loads
+try:
+    model = get_model()
+    supervisor_subgraph = create_supervisor_subgraph()
+    graph = create_main_graph()
 
 except Exception as e:
     # If API key is not available, create placeholder objects
-    print(f"Warning: Could not create agents during module import: {e}")
+    print(f"Warning: Could not create graphs during module import: {e}")
+    supervisor_subgraph = None
     graph = None
     
 
