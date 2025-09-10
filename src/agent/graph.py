@@ -175,7 +175,7 @@ def create_main_graph():
     builder.add_edge("classify_intent", "call_supervisor")
     builder.add_edge("call_supervisor", END)
     
-    return builder.compile()
+    return builder
 
 
 # Initialize components when module loads
