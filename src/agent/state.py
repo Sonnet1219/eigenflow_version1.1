@@ -5,36 +5,23 @@ from langgraph.graph import add_messages, MessagesState
 from langchain_core.messages import AnyMessage
 from typing import List, Optional, Dict, Any
 import operator
-from dataclasses import dataclass
+from src.agent.schemas import IntentContext, OrchestratorInputs
 
-
-@dataclass
-class IntentContext:
-    """Enhanced intent context with detailed classification information."""
-    schemaVer: str = "dc/v1"
-    intent: str = "margin_check"
-    confidence: float = 0.0
-    slots: Dict[str, Any] = None
-    traceId: str = ""
-    occurredAt: str = ""
-    
-    def __post_init__(self):
-        if self.slots is None:
-            self.slots = {}
-
-
+# main graph state
 class OverallState(TypedDict, total=False):
     """Main graph state managing overall workflow with enhanced intent classification."""
     messages: Annotated[list[AnyMessage], add_messages]
     intentContext: Optional[IntentContext]  # Enhanced intent context with full classification details
 
 
-class SupervisorState(TypedDict, total=False):
-    """Supervisor subgraph state for multi-agent coordination.""" 
-    messages: Annotated[list[AnyMessage], add_messages]
-    intentContext: Optional[IntentContext]  # Intent context passed from main graph to guide routing
-
-
-# MessagesState is used directly by individual agents in the supervisor subgraph
-
-
+# subgraph state
+class OrchestratorState(TypedDict, total=False):
+    """State structure for orchestrator operations between main graph and supervisor subgraph."""
+    messages: Annotated[list[AnyMessage], add_messages]  # Keep messages for LangGraph compatibility
+    schemaVer: str  # Schema version identifier
+    tool: str  # Tool identifier
+    inputs: "OrchestratorInputs"  # Operation inputs
+    tenantId: Optional[str]  # Tenant identifier
+    traceId: str  # Unique trace identifier
+    idempotencyKey: str  # Idempotency key for operation
+    occurredAt: str  # ISO8601 timestamp of occurrence

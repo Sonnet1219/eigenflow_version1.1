@@ -14,7 +14,7 @@ class Configuration(BaseModel):
     )
 
     model: str = Field(
-        default="qwen-max",
+        default="qwen-max-latest",
         metadata={"description": "LLM model name for chat."},
     )
 
