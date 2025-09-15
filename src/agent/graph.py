@@ -14,7 +14,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from langchain_core.messages import HumanMessage
 
-from src.agent.state import OverallState, SupervisorState
+from src.agent.state import OverallState, SupervisorState, IntentContext
 from src.agent.schemas import IntentClassification
 from src.agent.prompts import (
     CHAT_ASSISTANT_PROMPT,
@@ -37,14 +37,16 @@ def get_model():
 
 
 async def classify_intent(state: OverallState) -> OverallState:
-    """Classify user intent using LLM with structured output."""
+    """Classify user intent using LLM with enhanced structured output."""
     try:
         model = get_model()
         
         # Get the latest user message
         messages = state.get("messages", [])
         if not messages:
-            return {"intent": "chat"}
+            # Return default intent context for empty messages
+            default_context = IntentContext()
+            return {"intentContext": default_context}
             
         latest_message = messages[-1]
         user_input = latest_message.content if hasattr(latest_message, 'content') else str(latest_message)
@@ -57,11 +59,23 @@ async def classify_intent(state: OverallState) -> OverallState:
         
         result = await structured_model.ainvoke([HumanMessage(content=formatted_prompt)])
         
-        return {"intent": result.intent}
+        # Convert Pydantic model to IntentContext dataclass
+        intent_context = IntentContext(
+            schemaVer=result.schemaVer,
+            intent=result.intent,
+            confidence=result.confidence,
+            slots=result.slots.dict() if result.slots else {},
+            traceId=result.traceId,
+            occurredAt=result.occurredAt
+        )
+        
+        return {"intentContext": intent_context}
         
     except Exception as e:
         print(f"Error in intent classification: {e}")
-        return {"intent": "chat"}  # Default to chat on error
+        # Return default chat intent context on error
+        default_context = IntentContext(intent="chat", confidence=0.5)
+        return {"intentContext": default_context}
 
 
 async def call_supervisor(state: OverallState) -> OverallState:
@@ -70,7 +84,7 @@ async def call_supervisor(state: OverallState) -> OverallState:
         # Transform OverallState to SupervisorState
         supervisor_input = {
             "messages": state.get("messages", []),
-            "intent": state.get("intent", "chat")
+            "intentContext": state.get("intentContext", IntentContext())
         }
         
         # Invoke supervisor subgraph
