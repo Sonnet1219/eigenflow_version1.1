@@ -2,6 +2,7 @@
 
 import logging
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -19,6 +20,8 @@ class EventInput(BaseModel):
     """Event input for margin check operations."""
     messages: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional messages list")
     thread_id: Optional[str] = Field(default=None, description="Thread ID for conversation continuity")
+    eventType: Optional[str] = Field(default=None, description="Event type for automated alerts")
+    payload: Optional[Dict[str, Any]] = Field(default=None, description="Event payload data")
 
 
 class HistoryInput(BaseModel):
@@ -41,18 +44,44 @@ async def margin_check_endpoint(request: Request, body: EventInput):
     try:
         graph = request.app.state.graph
         
-        # Create initial message for margin check
-        if body.messages:
-            # Convert dict messages to HumanMessage objects
-            messages = []
-            for msg in body.messages:
-                if msg.get("type") == "human" or msg.get("role") == "user":
-                    messages.append(HumanMessage(content=msg.get("content", "")))
+        # Check if this is a MARGIN_ALERT event - skip intent classification
+        if body.eventType == "MARGIN_ALERT" and body.payload:
+            # Create alert message for direct processing
+            lp_name = body.payload.get("lp", "Unknown")
+            margin_level = body.payload.get("marginLevel", 0) * 100  # Convert to percentage
+            threshold = body.payload.get("threshold", 0.8) * 100
+            
+            alert_message = f"MARGIN ALERT: {lp_name} has reached {margin_level:.1f}% margin utilization (threshold: {threshold:.0f}%). Generate immediate margin analysis and recommendations."
+            messages = [HumanMessage(content=alert_message)]
+            
+            # Set intent context to skip classification
+            from src.agent.schemas import IntentContext
+            intent_context = IntentContext(
+                intent="lp_margin_check_report",
+                confidence=1.0,
+                slots={"lp": lp_name},  # Pass lp_name for direct filtering
+                traceId=f"alert_{lp_name}_{int(datetime.now().timestamp())}"
+            )
+            
+            initial_state = {
+                "messages": messages,
+                "intentContext": intent_context
+            }
         else:
-            # Default margin check request
-            messages = [HumanMessage(content="请生成当前LP账户的保证金水平报告和建议")]
-        
-        initial_state = {"messages": messages}
+            # Regular message processing
+            if body.messages:
+                # Convert dict messages to HumanMessage objects
+                messages = []
+                for msg in body.messages:
+                    if msg.get("type") == "human" or msg.get("role") == "user":
+                        messages.append(HumanMessage(content=msg.get("content", "")))
+            else:
+                # Default margin check request
+                messages = [HumanMessage(content="请生成当前LP账户的保证金水平报告和建议")]
+            
+            initial_state = {
+                "messages": messages
+            }
         
         # Use provided thread_id or generate new one
         thread_id = body.thread_id or f"margin_check_{hash(str(messages))}"
@@ -60,6 +89,7 @@ async def margin_check_endpoint(request: Request, body: EventInput):
         
         # Use ainvoke for simpler implementation
         try:
+            logger.info(f"Invoking graph with initial_state: {initial_state}")
             result = await graph.ainvoke(initial_state, config=config)
             
             # Check if there's an interrupt
@@ -98,7 +128,7 @@ async def margin_check_endpoint(request: Request, body: EventInput):
         
         
     except Exception as e:
-        logger.error(f"Margin check endpoint error: {str(e)}")
+        logger.error(f"Margin check endpoint error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

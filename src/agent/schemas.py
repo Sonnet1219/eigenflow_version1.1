@@ -14,7 +14,7 @@ class IntentScope(BaseModel):
     """Scope information for intent classification."""
     currentLevel: Optional[str] = Field(default="lp", description="Current operation level")
     brokerId: Optional[str] = Field(default=None, description="Broker identifier")
-    lp: Optional[str] = Field(default=None, description="LP identifier") 
+    lp: Optional[str] = Field(default=None, description="LP name for filtering (exact match from mapping table)") 
     group: Optional[str] = Field(default=None, description="Group identifier")
 
 
@@ -31,7 +31,7 @@ class IntentContext(BaseModel):
 class IntentClassification(BaseModel):
     """Enhanced intent classification result with detailed context."""
     schemaVer: str = Field(default="dc/v1", description="Schema version identifier")
-    intent: Literal['chat', 'lp_margin_check_report'] = Field(
+    intent: Literal['general_conversation', 'lp_margin_check_report'] = Field(
         description="The classified user intent"
     )
     confidence: float = Field(description="Classification confidence score (0-1)")
@@ -275,13 +275,24 @@ class ThresholdsRef(BaseModel):
 
 
 class PerLPMetrics(BaseModel):
-    """Per-LP margin metrics."""
+    """Per-LP margin metrics with integrated position summary."""
     lp: str = Field(description="LP identifier")
+    balance: float = Field(description="Account balance")
+    credit: float = Field(description="Credit amount")
     equity: float = Field(description="Account equity")
     marginUsed: float = Field(description="Margin currently used")
+    freeMargin: float = Field(description="Free margin available")
     marginLevel: float = Field(description="Margin utilization percentage")
+    unrealizedPnL: float = Field(description="Unrealized profit and loss")
+    dataTimestamp: str = Field(description="Data timestamp from API")
+    # Position summary data
+    totalPositions: int = Field(description="Total number of positions")
+    totalVolume: float = Field(description="Total position volume (absolute)")
+    totalExposure: float = Field(description="Total market exposure")
+    avgMarginRate: float = Field(description="Average margin rate across positions")
+    topSymbols: List[str] = Field(description="Top 3 symbols by volume")
+    # Risk and alert data
     thresholdsRef: ThresholdsRef = Field(description="Risk thresholds for this LP")
-    topPositionsKey: List[str] = Field(description="Top position IDs by margin usage")
     alertStatus: Optional[int] = Field(default=None, description="Alert status: 1=alert, 0=safe")
     alertMessage: Optional[str] = Field(default=None, description="Alert message if applicable")
 
@@ -290,6 +301,7 @@ class VolumePair(BaseModel):
     """Volume pair for cross-position analysis."""
     a: float = Field(description="Volume for LP A")
     b: float = Field(description="Volume for LP B")
+
 
 
 class CrossCandidate(BaseModel):
@@ -352,7 +364,7 @@ class MarginCheckToolResponse(BaseModel):
     status: Literal["ok", "warn", "critical"] = Field(description="Overall risk status")
     metrics: MarginMetrics = Field(description="Portfolio-wide metrics")
     normalization: Normalization = Field(description="Data normalization settings")
-    perLP: List[PerLPMetrics] = Field(description="Per-LP detailed metrics")
+    perLP: List[PerLPMetrics] = Field(description="Per-LP detailed metrics with position summaries")
     crossCandidates: List[CrossCandidate] = Field(description="Cross-position netting opportunities")
     moveCandidates: List[MoveCandidate] = Field(description="Position move recommendations")
     recommendations: List[Recommendation] = Field(description="Actionable risk management recommendations")

@@ -15,6 +15,7 @@ from langchain_core.tools import tool, InjectedToolCallId
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command, interrupt
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from src.agent.state import OverallState, OrchestratorState
 from src.agent.schemas import IntentContext, OrchestratorScope, OrchestratorInputs
@@ -24,8 +25,10 @@ from src.agent.prompts import (
     SUPERVISOR_PROMPT,
     INTENT_CLASSIFICATION_PROMPT
 )
+from src.agent.data_gateway import get_lp_mapping_string
+from src.agent.configuration import Configuration
 from src.agent.utils import chat_response
-from src.agent.mcp import get_lp_margin_check
+from src.agent.margin_tools import get_lp_margin_check
 
 
 def get_model():
@@ -38,7 +41,7 @@ def get_model():
     )
 
 
-async def classify_intent(state: OverallState) -> OverallState:
+async def classify_intent(state: OverallState, config: RunnableConfig) -> OverallState:
     """Classify user intent using LLM with enhanced structured output."""
     try:
         model = get_model()
@@ -56,8 +59,11 @@ async def classify_intent(state: OverallState) -> OverallState:
         # Use structured output for intent classification
         structured_model = model.with_structured_output(IntentClassification)
         
-        # Use the predefined prompt from prompts.py with user input formatting
-        formatted_prompt = INTENT_CLASSIFICATION_PROMPT.format(user_input=user_input)
+        # Use the predefined prompt from prompts.py with dynamic formatting
+        formatted_prompt = INTENT_CLASSIFICATION_PROMPT.format(
+            user_input=user_input,
+            lp_mapping=get_lp_mapping_string()
+        )
         
         result = await structured_model.ainvoke([HumanMessage(content=formatted_prompt)])
         
@@ -80,7 +86,7 @@ async def classify_intent(state: OverallState) -> OverallState:
         return {"intentContext": default_context}
 
 
-async def call_supervisor(state: OverallState) -> OverallState:
+async def call_supervisor(state: OverallState, config: RunnableConfig) -> OverallState:
     """Call supervisor subgraph with transformed state and return updated messages."""
     try:
         # Extract intent context from state
@@ -212,10 +218,11 @@ def create_supervisor_subgraph():
     return supervisor.compile()
 
 
-def human_approval_node(state: OverallState) -> Command:
+def human_approval_node(state: OverallState, config: RunnableConfig) -> Command:
     """Human approval node for margin check recommendations."""
     # Extract the last message which should contain the AI response
     last_message = state["messages"][-1] if state["messages"] else None
+    configurable = Configuration.from_runnable_config(config)
     
     # Only interrupt for margin check reports, not regular chat
     intent_context = state.get("intentContext")
@@ -224,7 +231,8 @@ def human_approval_node(state: OverallState) -> Command:
             "type": "margin_check_approval",
             "report": last_message.content if last_message else "No report generated",
             "question": "Please review the margin analysis report above. You can:\n1. Enter feedback/comments to continue discussion\n2. Leave empty to end the session",
-            "trace_id": intent_context.traceId
+            "trace_id": intent_context.traceId,
+            "card_id": configurable.thread_id
         })
         
         # If user provides input, go back to supervisor for further discussion
