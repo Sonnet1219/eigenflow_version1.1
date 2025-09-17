@@ -1,4 +1,4 @@
-"""Main FastAPI application for ArXiv Scraper backend."""
+"""Main FastAPI application for EigenFlow backend."""
 
 import os
 import sys
@@ -79,8 +79,8 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="ArXiv Scraper API",
-    description="Backend API for ArXiv scraping and minimal chat",
+    title=" EigenFlow API",
+    description="Backend API for EigenFlow scraping and minimal chat",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -114,4 +114,4 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/")
 async def root():
     """Root endpoint to check if API is running."""
-    return {"message": "ArXiv Scraper API is running"} 
+    return {"message": "EigenFlow API is running"} 

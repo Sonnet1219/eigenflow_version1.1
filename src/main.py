@@ -1,4 +1,4 @@
-"""Main entry point for ArXiv scraper and chat service."""
+"""Main entry point for EigenFlow service."""
 
 import uvicorn
 import os
