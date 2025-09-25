@@ -222,7 +222,7 @@ def human_approval_node(state: OverallState, config: RunnableConfig) -> Command:
     """Human approval node for margin check recommendations."""
     # Extract the last message which should contain the AI response
     last_message = state["messages"][-1] if state["messages"] else None
-    print("Human approval last message:", last_message)
+    # print("Human approval last message:", last_message)
     configurable = Configuration.from_runnable_config(config)
     
     # Only interrupt for margin check reports, not regular chat
@@ -292,3 +292,4 @@ async def build_graph(checkpointer, store=None):
         checkpointer=checkpointer,
         store=store
     )
+

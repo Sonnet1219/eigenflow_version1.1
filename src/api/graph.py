@@ -39,7 +39,7 @@ class MarginCheckResponse(BaseModel):
 
 
 @router.post("/margin-check")
-async def margin_check_endpoint(request: Request, body: EventInput):
+async def margin_check_endpoint(request: Request, body: EventInput, stream: bool = False):
     """Execute margin check analysis with human-in-the-loop approval."""
     try:
         graph = request.app.state.graph
@@ -87,6 +87,72 @@ async def margin_check_endpoint(request: Request, body: EventInput):
         thread_id = body.thread_id or f"margin_check_{hash(str(messages))}"
         config = {"configurable": {"thread_id": thread_id}}
         
+        if stream:
+            def format_sse(event_type: str, payload: Dict[str, Any]) -> str:
+                return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+            async def event_generator():
+                final_state = None
+                try:
+                    async for event in graph.astream_events(initial_state, config=config, version="v1"):
+                        if await request.is_disconnected():
+                            break
+
+                        event_type = event.get("event")
+                        data = event.get("data", {})
+
+                        if event_type == "on_chat_model_stream":
+                            chunk = data.get("chunk")
+                            text = ""
+                            if chunk is not None:
+                                # Langchain chunk objects expose content/message/text depending on backend
+                                chunk_content = getattr(chunk, "content", None)
+                                if chunk_content:
+                                    if isinstance(chunk_content, list):
+                                        text = "".join(part.get("text", "") for part in chunk_content if isinstance(part, dict))
+                                    else:
+                                        text = str(chunk_content)
+                                elif getattr(chunk, "message", None) and getattr(chunk.message, "content", None):
+                                    text = chunk.message.content
+                                elif hasattr(chunk, "text"):
+                                    text = str(chunk.text)
+                            if text:
+                                yield format_sse("token", {"thread_id": thread_id, "content": text})
+                        elif event_type == "on_chain_end" and event.get("name") == "graph":
+                            final_state = data.get("output")
+                except Exception as exc:
+                    logger.error(f"Streaming error: {exc}")
+                    yield format_sse("error", {"thread_id": thread_id, "error": str(exc)})
+                finally:
+                    if final_state:
+                        if "__interrupt__" in final_state:
+                            interrupt_info = final_state["__interrupt__"][0] if final_state["__interrupt__"] else None
+                            yield format_sse(
+                                "interrupt",
+                                {
+                                    "thread_id": thread_id,
+                                    "status": "awaiting_approval",
+                                    "interrupt_data": getattr(interrupt_info, "value", interrupt_info),
+                                },
+                            )
+                        else:
+                            final_messages = final_state.get("messages") or []
+                            final_content = ""
+                            if final_messages:
+                                last_msg = final_messages[-1]
+                                final_content = getattr(last_msg, "content", "")
+                            yield format_sse(
+                                "complete",
+                                {
+                                    "thread_id": thread_id,
+                                    "status": "completed",
+                                    "content": final_content,
+                                },
+                            )
+                    yield "event: end\ndata: {}\n\n"
+
+            return StreamingResponse(event_generator(), media_type="text/event-stream")
+
         # Use ainvoke for simpler implementation
         try:
             logger.info(f"Invoking graph with initial_state: {initial_state}")
@@ -133,7 +199,7 @@ async def margin_check_endpoint(request: Request, body: EventInput):
 
 
 @router.post("/margin-check/recheck")
-async def margin_recheck_endpoint(request: Request, body: EventInput):
+async def margin_recheck_endpoint(request: Request, body: EventInput, stream: bool = False):
     """Resume margin check conversation after human approval."""
     try:
         graph = request.app.state.graph
@@ -152,6 +218,71 @@ async def margin_recheck_endpoint(request: Request, body: EventInput):
         #             user_input = msg.get("content", "")
         #             break
         
+        if stream:
+            def format_sse(event_type: str, payload: Dict[str, Any]) -> str:
+                return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+            async def event_generator():
+                final_state = None
+                try:
+                    async for event in graph.astream_events(Command(resume=user_input), config=config, version="v1"):
+                        if await request.is_disconnected():
+                            break
+
+                        event_type = event.get("event")
+                        data = event.get("data", {})
+
+                        if event_type == "on_chat_model_stream":
+                            chunk = data.get("chunk")
+                            text = ""
+                            if chunk is not None:
+                                chunk_content = getattr(chunk, "content", None)
+                                if chunk_content:
+                                    if isinstance(chunk_content, list):
+                                        text = "".join(part.get("text", "") for part in chunk_content if isinstance(part, dict))
+                                    else:
+                                        text = str(chunk_content)
+                                elif getattr(chunk, "message", None) and getattr(chunk.message, "content", None):
+                                    text = chunk.message.content
+                                elif hasattr(chunk, "text"):
+                                    text = str(chunk.text)
+                            if text:
+                                yield format_sse("token", {"thread_id": body.thread_id, "content": text})
+                        elif event_type == "on_chain_end" and event.get("name") == "graph":
+                            final_state = data.get("output")
+                except Exception as exc:
+                    logger.error(f"Streaming error during recheck: {exc}")
+                    yield format_sse("error", {"thread_id": body.thread_id, "error": str(exc)})
+                finally:
+                    if final_state:
+                        if "__interrupt__" in final_state:
+                            interrupt_info = final_state["__interrupt__"][0] if final_state["__interrupt__"] else None
+                            yield format_sse(
+                                "interrupt",
+                                {
+                                    "thread_id": body.thread_id,
+                                    "status": "awaiting_approval",
+                                    "interrupt_data": getattr(interrupt_info, "value", interrupt_info),
+                                },
+                            )
+                        else:
+                            final_messages = final_state.get("messages") or []
+                            final_content = ""
+                            if final_messages:
+                                last_msg = final_messages[-1]
+                                final_content = getattr(last_msg, "content", "")
+                            yield format_sse(
+                                "complete",
+                                {
+                                    "thread_id": body.thread_id,
+                                    "status": "completed",
+                                    "content": final_content,
+                                },
+                            )
+                    yield "event: end\ndata: {}\n\n"
+
+            return StreamingResponse(event_generator(), media_type="text/event-stream")
+
         # Use ainvoke for simpler implementation
         try:
             result = await graph.ainvoke(Command(resume=user_input), config=config)
