@@ -144,19 +144,20 @@ async def margin_recheck_endpoint(request: Request, body: EventInput):
         config = {"configurable": {"thread_id": body.thread_id}}
         
         # Determine user input for resuming
-        user_input = ""
-        if body.messages:
-            # Extract user input from messages
-            for msg in body.messages:
-                if msg.get("type") == "human" or msg.get("role") == "user":
-                    user_input = msg.get("content", "")
-                    break
+        user_input = HumanMessage(content="再次生成实时的保证金分析和建议")  # Default prompt to continue analysis
+        # if body.messages:
+        #     # Extract user input from messages
+        #     for msg in body.messages:
+        #         if msg.get("type") == "human" or msg.get("role") == "user":
+        #             user_input = msg.get("content", "")
+        #             break
         
         # Use ainvoke for simpler implementation
         try:
             result = await graph.ainvoke(Command(resume=user_input), config=config)
             
             # Check if there's an interrupt
+            # As long as there's an interrupt, we return supervisor 
             if "__interrupt__" in result:
                 interrupt_info = result["__interrupt__"][0] if result["__interrupt__"] else None
                 

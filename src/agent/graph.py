@@ -202,7 +202,7 @@ def create_supervisor_subgraph():
 
     # Removed margin_assistant - supervisor now handles margin checks directly
 
-    forwarding_tool = create_forward_message_tool("supervisor")
+    forwarding_tool = create_forward_message_tool("human_approval")
 
     # Create supervisor subgraph and compile it
     supervisor = create_supervisor(
@@ -210,8 +210,8 @@ def create_supervisor_subgraph():
         model=model,
         prompt=SUPERVISOR_PROMPT,
         add_handoff_messages=False,   # Don't add handoff messages to conversation history
-        output_mode="last_message",   # Return only the last message from the active agent
-        tools=[forwarding_tool, get_lp_margin_check]  # Supervisor can use tools directly
+        output_mode="full_history",   # Return only the last message from the active agent
+        tools=[get_lp_margin_check, forwarding_tool]  # Supervisor can use tools directly
     )
     
     # Compile the supervisor subgraph so it has ainvoke method
@@ -222,6 +222,7 @@ def human_approval_node(state: OverallState, config: RunnableConfig) -> Command:
     """Human approval node for margin check recommendations."""
     # Extract the last message which should contain the AI response
     last_message = state["messages"][-1] if state["messages"] else None
+    print("Human approval last message:", last_message)
     configurable = Configuration.from_runnable_config(config)
     
     # Only interrupt for margin check reports, not regular chat

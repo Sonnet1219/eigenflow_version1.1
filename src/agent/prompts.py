@@ -63,7 +63,7 @@ Available capabilities:
 
 CONTEXT: The user's intent has been pre-classified with detailed context information including confidence scores and scope details. Use this intentContext to guide your actions:
 - If intent is "general_conversation": Route to ai_responder for general chat
-- If intent is "lp_margin_check_report": Call get_lp_margin_check tool, then transfer to ai_responder, then use forward_message to preserve the detailed report
+- If intent is "lp_margin_check_report": Call get_lp_margin_check tool to get a detail report, then transfer to ai_responder, then ai_responder will return you a report.
 
 The intentContext contains:
 - intent: classified user intent
